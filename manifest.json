@@ -1,0 +1,33 @@
+{
+  "manifest_version": 2,
+  "name": "FB Marketplace Auto Renew",
+  "version": "0.1.0",
+  "description": "Bantu me-renew listing Facebook Marketplace saat FB mengizinkan (cek harian otomatis + tombol manual).",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "fbm-auto-renew@example.local",
+      "strict_min_version": "109.0"
+    }
+  },
+  "permissions": [
+    "alarms",
+    "storage",
+    "tabs",
+    "https://*.facebook.com/*"
+  ],
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": true
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.facebook.com/marketplace/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_action": {
+    "default_title": "FB Marketplace Auto Renew",
+    "default_popup": "popup.html"
+  }
+}

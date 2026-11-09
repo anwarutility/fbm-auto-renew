@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body {
+      width: 300px;
+      font: 13px/1.5 system-ui, sans-serif;
+      margin: 0;
+      padding: 14px;
+      color: #1c1e21;
+    }
+    h1 { font-size: 15px; margin: 0 0 10px; }
+    .card {
+      background: #f0f2f5;
+      border-radius: 8px;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+    .row { display: flex; justify-content: space-between; }
+    .muted { color: #65676b; }
+    #status { min-height: 18px; margin-bottom: 8px; font-weight: 600; }
+    #history { list-style: none; margin: 0; padding: 0; max-height: 120px; overflow-y: auto; }
+    #history li { padding: 3px 0; border-bottom: 1px solid #e4e6eb; font-size: 12px; }
+    button {
+      width: 100%;
+      padding: 8px;
+      border: 0;
+      border-radius: 6px;
+      background: #1877f2;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:disabled { background: #9fb9dd; cursor: not-allowed; }
+    label.checkbox { display: block; margin: 8px 0; }
+    .limits { margin-top: 6px; }
+    .limits input { width: 56px; }
+  </style>
+</head>
+<body>
+  <h1>FB Marketplace Auto Renew</h1>
+
+  <div class="card">
+    <div><strong>Ringkasan</strong></div>
+    <div class="row"><span>Terakhir jalan</span><span id="lastRun" class="muted">–</span></div>
+    <div class="row"><span>Total renew</span><span id="totalRenewed" class="muted">0</span></div>
+  </div>
+
+  <div id="status" class="muted">Siap.</div>
+  <button id="startBtn">Renew Sekarang</button>
+
+  <label class="checkbox">
+    <input type="checkbox" id="autoDaily" /> Cek otomatis sekali sehari
+  </label>
+
+  <div class="limits muted">
+    Batas listing per run:
+    <input type="number" id="maxPerRun" min="1" max="50" /> <span class="muted">item</span>
+  </div>
+
+  <div class="card"><strong>Riwayat</strong><ul id="history"></ul></div>
+
+  <p class="muted" style="font-size:11px">
+    Catatan: ekstensi hanya jalan saat tab marketplace terbuka/dibuat oleh Firefox.
+    Tombol Renew muncul bila FB mengizinkan untuk item itu.
+  </p>
+
+  <script src="popup.js"></script>
+</body>
+</html>
