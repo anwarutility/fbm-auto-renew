@@ -1,15 +1,15 @@
-// background.js — jadwal alarm harian + pengaturan satu "run" renewal.
-// Alur: alarm/manual trigger -> tandai pending di storage -> reload/buka tab
-// halaman "Your items" -> content script yang mendeteksi & klik tombol Renew.
+// background.js — alarm harian (renew), koordinasi run, dan download foto
+// untuk posting iklan.
 
 const ALARM_NAME = 'fbm-daily-check';
-const TARGET_URL = 'https://www.facebook.com/marketplace/you/';
-const STALE_MS = 30 * 60 * 1000; // run dianggap mati jika >30 menit tak selesai
+const RENEW_URL = 'https://www.facebook.com/marketplace/you/';
+const CREATE_URL = 'https://www.facebook.com/marketplace/create/item';
+const STALE_MS = 30 * 60 * 1000;
 
 const DEFAULTS = {
-  autoDaily: true,     // alarm harian aktif?
+  autoDaily: true,     // alarm harian renew aktif?
   maxPerRun: 10,       // batas listing yang diproses per run (anti-bot)
-  minDelayMs: 4000,    // delay antar item (acak antara min..max)
+  minDelayMs: 4000,    // delay antar item renew (acak antara min..max)
   maxDelayMs: 15000
 };
 
@@ -22,24 +22,21 @@ async function ensureAlarm() {
   if (!settings) await browser.storage.local.set({ settings: DEFAULTS });
   const s = settings || DEFAULTS;
 
-  // reset alarm supaya selalu sinkron dengan setting terbaru
   await browser.alarms.clear(ALARM_NAME);
   if (s.autoDaily) {
     browser.alarms.create(ALARM_NAME, { periodInMinutes: 24 * 60 });
   }
 }
 
-// ---------- trigger ----------
+// ---------- RENEW ----------
 async function startRun(source) {
   const { runState } = await browser.storage.local.get({ runState: null });
-  if (runState && runState.running && Date.now() - runState.startedAt < STALE_MS) {
-    return; // masih ada run aktif (atau baru saja), skip
-  }
+  if (runState && runState.running && Date.now() - runState.startedAt < STALE_MS) return;
 
   await browser.storage.local.set({
     runState: {
       running: true,
-      pending: true,           // content script memakai flag ini untuk mulai
+      pending: true,
       startedAt: Date.now(),
       source,
       renewed: 0,
@@ -48,14 +45,13 @@ async function startRun(source) {
     }
   });
 
-  // pakai tab marketplace yang sudah terbuka kalau ada, kalau tidak buka baru
   const tabs = await browser.tabs.query({ url: 'https://www.facebook.com/*' });
   const marketTab = tabs.find(t => (t.url || '').includes('/marketplace/you'));
   if (marketTab) {
-    await browser.tabs.reload(marketTab.id); // reload -> content script jalan & lihat flag pending
+    await browser.tabs.reload(marketTab.id);
     if (source === 'manual') await browser.tabs.update(marketTab.id, { active: true });
   } else {
-    await browser.tabs.create({ url: TARGET_URL, active: source === 'manual' });
+    await browser.tabs.create({ url: RENEW_URL, active: source === 'manual' });
   }
 }
 
@@ -63,15 +59,69 @@ browser.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) startRun('alarm');
 });
 
-// ---------- pesan dari popup & content script ----------
-browser.runtime.onMessage.addListener((msg) => {
+// ---------- POST ----------
+async function startPost(template) {
+  const { postState } = await browser.storage.local.get({ postState: null });
+  if (postState && postState.running && Date.now() - postState.startedAt < STALE_MS) return;
+
+  await browser.storage.local.set({
+    postState: {
+      running: true,
+      pending: true,
+      startedAt: Date.now(),
+      template: template || {},
+      status: 'Menyiapkan halaman create...'
+    }
+  });
+
+  const tabs = await browser.tabs.query({ url: 'https://www.facebook.com/*' });
+  const createTab = tabs.find(t => (t.url || '').includes('/marketplace/create'));
+  if (createTab) {
+    await browser.tabs.update(createTab.id, { url: CREATE_URL, active: true });
+    await browser.tabs.reload(createTab.id);
+  } else {
+    await browser.tabs.create({ url: CREATE_URL, active: true });
+  }
+}
+
+// ---------- download foto (dipanggil content script) ----------
+async function downloadPhoto(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const buf = await res.arrayBuffer();
+    const mime = (res.headers.get('content-type') || 'image/jpeg').split(';')[0];
+
+    let binary = '';
+    const bytes = new Uint8Array(buf);
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return `data:${mime};base64,${btoa(binary)}`;
+  } catch (e) {
+    console.error('[fbm] download foto gagal:', url, e);
+    return null;
+  }
+}
+
+// ---------- pesan ----------
+browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'trigger-renew') startRun('manual');
-  else if (msg.type === 'renew-progress') onProgress(msg);
-  else if (msg.type === 'renew-finished') onFinish(msg);
+  else if (msg.type === 'trigger-post') startPost(msg.template);
+  else if (msg.type === 'renew-progress') onRenewProgress(msg);
+  else if (msg.type === 'renew-finished') onRenewFinished(msg);
+  else if (msg.type === 'post-progress') onPostProgress(msg);
+  else if (msg.type === 'post-finished') onPostFinished(msg);
   else if (msg.type === 'settings-changed') ensureAlarm();
+  else if (msg.type === 'download-photo') {
+    downloadPhoto(msg.url).then((dataUrl) => sendResponse({ ok: !!dataUrl, dataUrl }));
+    return true; // respons async
+  }
 });
 
-async function onProgress(msg) {
+// ---------- handler renew ----------
+async function onRenewProgress(msg) {
   const { runState } = await browser.storage.local.get({ runState: {} });
   if (!runState.running) return;
   Object.assign(runState, {
@@ -88,11 +138,12 @@ async function onProgress(msg) {
   }
 }
 
-async function onFinish(msg) {
+async function onRenewFinished(msg) {
   const { runState } = await browser.storage.local.get({ runState: {} });
   const wraps = await browser.storage.local.get({ history: [], stats: {} });
 
   const entry = {
+    kind: 'renew',
     at: Date.now(),
     source: runState.source || 'unknown',
     renewed: msg.renewed ?? 0,
@@ -100,14 +151,48 @@ async function onFinish(msg) {
   };
 
   await browser.storage.local.set({
-    history: [...wraps.history, entry].slice(-20),
+    history: [...wraps.history, entry].slice(-30),
     stats: {
       totalRenewed: (wraps.stats.totalRenewed || 0) + entry.renewed,
+      totalPosted: wraps.stats.totalPosted || 0,
       lastRunAt: entry.at
     },
     runState: { running: false, finishedAt: entry.at, lastSummary: entry }
   });
 
-  // kosongkan badge beberapa lama kemudian
+  setTimeout(() => browser.browserAction.setBadgeText({ text: '' }), 60 * 1000);
+}
+
+// ---------- handler post ----------
+async function onPostProgress(msg) {
+  const { postState } = await browser.storage.local.get({ postState: {} });
+  if (!postState || !postState.running) return;
+  postState.status = msg.status ?? postState.status;
+  await browser.storage.local.set({ postState });
+}
+
+async function onPostFinished(msg) {
+  const { postState } = await browser.storage.local.get({ postState: {} });
+  const wraps = await browser.storage.local.get({ history: [], stats: {} });
+
+  const entry = {
+    kind: 'post',
+    at: Date.now(),
+    title: (postState.template && postState.template.title) || '(tanpa judul)',
+    filled: msg.filled ?? 0,
+    fields: msg.total ?? 0,
+    photos: msg.photoCount ?? 0
+  };
+
+  await browser.storage.local.set({
+    history: [...wraps.history, entry].slice(-30),
+    stats: {
+      totalRenewed: wraps.stats.totalRenewed || 0,
+      totalPosted: (wraps.stats.totalPosted || 0) + 1,
+      lastRunAt: entry.at
+    },
+    postState: { running: false, finishedAt: entry.at, lastSummary: entry }
+  });
+
   setTimeout(() => browser.browserAction.setBadgeText({ text: '' }), 60 * 1000);
 }

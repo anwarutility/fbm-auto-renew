@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "FB Marketplace Auto Renew",
-  "version": "0.1.0",
-  "description": "Bantu me-renew listing Facebook Marketplace saat FB mengizinkan (cek harian otomatis + tombol manual).",
+  "version": "0.2.0",
+  "description": "Posting iklan baru (semi-otomatis) + auto-renew listing Facebook Marketplace saat FB mengizinkan.",
   "browser_specific_settings": {
     "gecko": {
       "id": "fbm-auto-renew@example.local",

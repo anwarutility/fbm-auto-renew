@@ -1,64 +1,61 @@
-# FB Marketplace Auto Renew (Firefox)
+# FB Marketplace Tools (Firefox)
 
-Ekstensi starter Firefox (Manifest V2) untuk me-renew listing Facebook Marketplace
-pada GUI saat **FB mengizinkan** pembaharuan (tombol Renew muncul, umumnya ±7 hari
-setelah terbit, bisa beberapa kali per listing).
+Ekstensi Firefox (Manifest V2) dengan dua alat untuk Facebook Marketplace:
+
+1. **Posting Iklan** — isi form iklan baru dari template (judul, harga, kategori,
+   kondisi, lokasi, deskripsi, foto dari URL), lalu tandai tombol Publish.
+   **Semi-otomatis**: kamu tetap review & klik Publish sendiri.
+2. **Auto Renew** — cek harian otomatis (alarm) + tombol manual; me-renew semua
+   listing yang FB izinkan (tombol Renew muncul, umumnya ±7 hari setelah terbit).
 
 ## Fitur
 
-- **Cek harian otomatis** via `alarms` API — sekali sehari membuka/merefresh halaman
-  "Your items" (`facebook.com/marketplace/you`) dan me-renew semua listing yang FB izinkan.
-- **Tombol "Renew Sekarang"** manual dari popup.
-- Delay acak antar item (4–15 detik) + batas listing per run (default 10) supaya
-  polanya tidak seperti bot.
-- Riwayat run + statistik total renew di popup, badge angka di ikon ekstensi.
+- Template iklan tersimpan di `storage.local`, dikelola lewat popup
+- Foto: unduh otomatis dari URL (via background fetch); kalau gagal, ekstensi
+  menandai dan kamu upload manual
+- Isi field pakai native setter + event `input`/`change` (FB pakai React)
+- Renew: delay acak 4–15 detik antar item + batas listing per run (default 10)
+- Riwayat run + statistik (total renew & total posting) di popup, badge di ikon
 
 ## Cara Install (temporary / developer)
 
 1. Buka `about:debugging` → **This Firefox** → **Load Temporary Add-on…**
-2. Pilih file `manifest.json` di folder ekstensi.
-3. Pin ikonnya, buka popup → klik **Renew Sekarang** dengan halaman marketplacemu terbuka.
-
-Sumber daya Firefox: developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions
+2. Pilih file `manifest.json`.
+3. Pin ikon → popup → tab **Posting Iklan** (buat template → Post Sekarang)
+   atau tab **Renew** (Renew Sekarang / cek harian).
 
 ## Cara Kerja
 
-1. `background.js` — alarm sekali sehari. Saat nyala: set flag `pending`
-   di `storage.local`, lalu reload/buka tab `marketplace/you`.
-2. `content.js` — di halaman "Your items", bila flag `pending` ada:
-   - kumpulkan kartu listing (`a[href*="/marketplace/item/"]`) dengan scroll bertahap
-   - per kartu: buka menu "..." → cari `[role="menuitem"]` bertuliskan
-     `Renew / Perbarui / Perpanjang` → klik → konfirmasi dialog bila muncul
-   - kirim progress & hasil ke background
-3. `popup.html/js` — tampilan status, riwayat, pengaturan (`autoDaily`, `maxPerRun`).
+- `background.js` — alarm harian; koordinasi run; download foto (base64) untuk
+  di-inject ke `<input type="file">`.
+- `content.js` — di `/marketplace/you` (renew) dan `/marketplace/create` (post).
+  Semua aksi dipicu lewat flag `pending` di storage.
+- `popup.html/js` — UI dua tab, template CRUD, status & riwayat.
 
-## Yang Peka Terhadap Perubahan DOM (rawan rusak)
+## Selector & Risiko
 
-Facebook memakai class obfuscated (`x1qhh9c…`) yang berubah-ubah. Ekstensi ini
-sengaja **tidak** memakai class tersebut; selector yang dipakai:
-
-- `a[href*="/marketplace/item/"]` — kartu listing
-- `[role="button"]`, `[role="combobox"]`, `[role="menuitem"]`, `[role="dialog"]`
-- teks/`aria-label`: `renew | perbarui | perpanjang`, `more | options | opsi | tindakan`
-
-Kalau suatu hari renew gagal terdeteksi, cek dulu di halaman: apakah struktur
-role/menu berubah, dan sesuaikan fungsi `findKebab` / `findRenewMenu` di `content.js`.
-
-## Batasan
-
-- Jalan **saat Firefox hidup** — alarm yang terlewat (laptop mati) menyusul saat browser dibuka.
-- Pengisian tombol renew hanya mungkin bila FB memang menampilkan tombol Renew.
-- Bukan pengganti "Delete & Relist" (strategi lain, mekanisme & risiko beda).
-- Otomatisasi ada risiko pembatasan akun — batas `maxPerRun` dan delay acak
-  sengaja default moderat, bukan hiasan.
+- **Tidak** memakai class obfuscated FB (`x1qhh9c…`). Yang dipakai:
+  `a[href*="/marketplace/item/"]`, `[role="button"]`, `[role="combobox"]`,
+  `[role="menuitem"]`, `[role="dialog"]`, `[role="option"]`, plus `aria-label` /
+  `placeholder` (`title`, `price`, `category`, `condition`, `location`,
+  `description`) dan teks `renew | perbarui | perpanjang`.
+- Kalau form berubah, sesuaikan `findField`, `fillCombobox`, `findKebab`,
+  `findRenewMenu` di `content.js`.
+- Otomatisasi FB berisiko pembatasan akun. Delay acak & batas per run sengaja
+  default moderat. **Jangan** dipakai untuk spam/mass-posting agresif.
+- Ekstensi hanya jalan saat Firefox hidup & tab marketplace terbuka/dibuat.
 
 ## Struktur
 
 ```
 fbm-auto-renew/
 ├── manifest.json
-├── background.js   # alarm + koordinasi run
-├── content.js      # deteksi & klik tombol Renew
-├── popup.html/js   # UI status, riwayat, pengaturan
+├── background.js   # alarm, koordinasi run, download foto
+├── content.js      # renew + isi form posting
+├── popup.html/js   # UI dua tab, template, status, riwayat
 └── README.md
 ```
+
+## Rilis
+
+Unduh ZIP siap pakai di halaman [Releases](../../releases).
