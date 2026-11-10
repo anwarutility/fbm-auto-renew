@@ -411,68 +411,80 @@ function highlightPublish() {
 
 async function fillListing(t) {
   const report = (status) => send({ type: 'post-progress', status });
+  let filled = 0;
+  let totalCount = 0;
+  let photoCount = 0;
 
-  await report('Menunggu form Marketplace siap...');
-  // Tunggu sampai form marketplace benar-benar dirender oleh React
-  await waitFor(() => {
-    const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea, [contenteditable="true"]');
-    return inputs.length >= 2;
-  }, 25000, 500);
+  try {
+    await report('Menunggu form Marketplace siap...');
+    // Tunggu sampai form marketplace benar-benar dirender oleh React
+    await waitFor(() => {
+      const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea, [contenteditable="true"]');
+      return inputs.length >= 2;
+    }, 20000, 500);
 
-  await sleep(1500);
-  await report('Mengisi data iklan...');
+    await sleep(1200);
+    await report('Mengisi data iklan...');
 
-  const results = [];
+    const results = [];
 
-  // 1. Judul (ID + EN)
-  results.push(['title', await fillText(['judul', 'title', 'apa yang anda jual', 'what are you selling'], t.title)]);
-  await sleep(400);
+    // 1. Judul (ID + EN)
+    results.push(['title', await fillText(['judul', 'title', 'apa yang anda jual', 'what are you selling'], t.title)]);
+    await sleep(350);
 
-  // 2. Harga (ID + EN)
-  results.push(['price', await fillText(['harga', 'price'], t.price)]);
-  await sleep(400);
+    // 2. Harga (ID + EN)
+    results.push(['price', await fillText(['harga', 'price'], t.price)]);
+    await sleep(350);
 
-  // 3. Kategori (jika diisi)
-  if (t.category) {
-    results.push(['category', await fillCombobox(['kategori', 'category'], t.category)]);
-    await sleep(400);
+    // 3. Kategori (jika diisi)
+    if (t.category) {
+      results.push(['category', await fillCombobox(['kategori', 'category'], t.category)]);
+      await sleep(350);
+    }
+
+    // 4. Kondisi (jika diisi)
+    if (t.condition) {
+      results.push(['condition', await fillCondition(t.condition)]);
+      await sleep(350);
+    }
+
+    // 5. Deskripsi (ID + EN)
+    results.push(['description', await fillText(['keterangan', 'deskripsi', 'description'], t.description)]);
+    await sleep(350);
+
+    // 6. Lokasi (jika diisi)
+    if (t.location) {
+      results.push(['location', await fillCombobox(['lokasi', 'location', 'kota', 'city'], t.location)]);
+      await sleep(350);
+    }
+
+    // 7. Foto (jika ada)
+    const photoUrls = splitPhotoUrls(t.photos);
+    let photoResult = { ok: false, count: 0, manualNeeded: [] };
+    if (photoUrls.length) {
+      await report(`Mengunduh ${photoUrls.length} foto...`);
+      photoResult = await addPhotos(photoUrls);
+      results.push(['photos', photoResult.ok]);
+    }
+
+    filled = results.filter(([, ok]) => ok).length;
+    totalCount = results.length;
+    photoCount = photoResult.count;
+
+    let status = `Terisi ${filled}/${totalCount} field`;
+    if (photoResult.ok) status += `, ${photoCount} foto terpasang`;
+    if (photoResult.manualNeeded && photoResult.manualNeeded.length) {
+      status += ` · ${photoResult.manualNeeded.length} foto gagal (upload manual)`;
+    }
+
+    const publishHighlighted = highlightPublish();
+    status += publishHighlighted ? ' · tombol Publish ditandai' : ' · cari tombol Publish';
+
+    await report(status);
+  } catch (err) {
+    console.error('[fbm] fillListing error', err);
+    await report('Selesai dengan catatan: ' + (err.message || 'cek form'));
+  } finally {
+    await send({ type: 'post-finished', filled, total: totalCount, photoCount });
   }
-
-  // 4. Kondisi (jika diisi)
-  if (t.condition) {
-    results.push(['condition', await fillCondition(t.condition)]);
-    await sleep(400);
-  }
-
-  // 5. Deskripsi (ID + EN)
-  results.push(['description', await fillText(['keterangan', 'deskripsi', 'description'], t.description)]);
-  await sleep(400);
-
-  // 6. Lokasi (jika diisi)
-  if (t.location) {
-    results.push(['location', await fillCombobox(['lokasi', 'location', 'kota', 'city'], t.location)]);
-    await sleep(400);
-  }
-
-  // 7. Foto (jika ada)
-  const photoUrls = splitPhotoUrls(t.photos);
-  let photoResult = { ok: false, count: 0, manualNeeded: [] };
-  if (photoUrls.length) {
-    await report(`Mengunduh ${photoUrls.length} foto...`);
-    photoResult = await addPhotos(photoUrls);
-    results.push(['photos', photoResult.ok]);
-  }
-
-  const filled = results.filter(([, ok]) => ok).length;
-  let status = `Terisi ${filled}/${results.length} field`;
-  if (photoResult.ok) status += `, ${photoResult.count} foto terpasang`;
-  if (photoResult.manualNeeded && photoResult.manualNeeded.length) {
-    status += ` · ${photoResult.manualNeeded.length} foto gagal (upload manual)`;
-  }
-
-  const publishHighlighted = highlightPublish();
-  status += publishHighlighted ? ' · tombol Publish ditandai' : ' · cari tombol Publish';
-
-  await report(status);
-  await send({ type: 'post-finished', filled, total: results.length, photoCount: photoResult.count });
 }

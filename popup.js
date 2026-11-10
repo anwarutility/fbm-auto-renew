@@ -17,6 +17,22 @@ function showPane(which) {
 $('tabPost').addEventListener('click', () => showPane('post'));
 $('tabRenew').addEventListener('click', () => showPane('renew'));
 
+// ---------- helper reset running state ----------
+async function unfreezePostState() {
+  await browser.storage.local.set({
+    postState: { running: false, finishedAt: Date.now() }
+  });
+  $('postBtn').disabled = false;
+  $('postStatus').textContent = 'Siap.';
+}
+
+const resetBtn = $('resetPostBtn');
+if (resetBtn) {
+  resetBtn.addEventListener('click', async () => {
+    await unfreezePostState();
+  });
+}
+
 // ---------- template CRUD ----------
 async function loadTemplates() {
   const { templates: t = [] } = await browser.storage.local.get({ templates: [] });
@@ -76,6 +92,7 @@ $('tplSelect').addEventListener('change', () => {
 });
 
 $('tplNew').addEventListener('click', async () => {
+  await unfreezePostState();
   const t = {
     id: 't' + Date.now(),
     ...currentForm(),
@@ -87,10 +104,11 @@ $('tplNew').addEventListener('click', async () => {
   await browser.storage.local.set({ templates });
   renderTemplateSelect();
   fillForm();
-  $('postStatus').textContent = 'Template baru dibuat. Isi field lalu Simpan.';
+  $('postStatus').textContent = 'Template baru dibuat. Isi field lalu Simpan/Post.';
 });
 
 $('tplSave').addEventListener('click', async () => {
+  await unfreezePostState();
   let t = templates.find((x) => x.id === selectedId);
   if (!t) {
     t = { id: 't' + Date.now(), createdAt: Date.now() };
@@ -175,12 +193,22 @@ async function loadStatus() {
   const { stats = {}, runState = {}, postState = {}, history = [] } =
     await browser.storage.local.get({ stats: {}, runState: {}, postState: {}, history: [] });
 
+  const now = Date.now();
+
   $('lastRun').textContent = fmtTime(stats.lastRunAt);
   $('totalRenewed').textContent = stats.totalRenewed || 0;
   $('totalPosted').textContent = stats.totalPosted || 0;
 
-  // renew status
-  const renewRunning = runState.running && !runState.finishedAt;
+  // renew status dengan proteksi timeout (maks 5 menit)
+  const isRenewStale = runState.startedAt && (now - runState.startedAt > 300000);
+  let renewRunning = runState.running && !runState.finishedAt;
+  if (renewRunning && isRenewStale) {
+    renewRunning = false;
+    runState.running = false;
+    runState.finishedAt = now;
+    browser.storage.local.set({ runState });
+  }
+
   $('startBtn').disabled = renewRunning;
   if (renewRunning) {
     $('status').textContent =
@@ -194,15 +222,25 @@ async function loadStatus() {
     $('status').textContent = 'Siap.';
   }
 
-  // post status
-  const postRunning = postState.running && !postState.finishedAt;
+  // post status dengan proteksi timeout (maks 35 detik)
+  const isPostStale = postState.startedAt && (now - postState.startedAt > 35000);
+  let postRunning = postState.running && !postState.finishedAt;
+  if (postRunning && isPostStale) {
+    postRunning = false;
+    postState.running = false;
+    postState.finishedAt = now;
+    browser.storage.local.set({ postState });
+  }
+
   $('postBtn').disabled = postRunning;
   if (postRunning) {
     $('postStatus').textContent = postState.status || 'Mengerjakan...';
   } else if (postState.lastSummary) {
     const s = postState.lastSummary;
     $('postStatus').textContent =
-      `Terakhir: "${s.title}" — ${s.filled}/${s.fields} field, ${s.photos} foto. Review lalu klik Publish.`;
+      `Terakhir: "${s.title}" — ${s.filled}/${s.fields} field, ${s.photos} foto.`;
+  } else {
+    $('postStatus').textContent = 'Siap.';
   }
 
   // riwayat gabungan
