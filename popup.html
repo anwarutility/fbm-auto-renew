@@ -29,9 +29,9 @@
     label.checkbox { display: block; margin: 8px 0; }
     .field { margin-bottom: 8px; }
     .field label { display: block; font-size: 12px; color: #65676b; margin-bottom: 2px; }
-    .field input, .field textarea {
+    .field input, .field textarea, .field select {
       width: 100%; box-sizing: border-box; padding: 6px; border: 1px solid #ccd0d5;
-      border-radius: 6px; font: inherit;
+      border-radius: 6px; font: inherit; background: #fff;
     }
     .field textarea { resize: vertical; min-height: 54px; }
     .limits { margin-top: 6px; }
@@ -58,15 +58,66 @@
     </div>
 
     <div class="card">
-      <div class="field"><label>Judul *</label><input id="f_title" /></div>
-      <div class="field"><label>Harga</label><input id="f_price" /></div>
-      <div class="field"><label>Kategori</label><input id="f_category" placeholder="mis. Otomotif" /></div>
-      <div class="field"><label>Kondisi</label><input id="f_condition" placeholder="mis. Baru / Bekas" /></div>
-      <div class="field"><label>Lokasi (opsional)</label><input id="f_location" /></div>
-      <div class="field"><label>Deskripsi</label><textarea id="f_desc"></textarea></div>
+      <div class="field"><label>Judul *</label><input id="f_title" placeholder="Nama barang yang dijual" /></div>
+      <div class="field"><label>Harga (Rp)</label><input id="f_price" type="number" placeholder="mis. 50000" /></div>
+      
       <div class="field">
-        <label>URL Foto (satu per baris / koma) — kalau gagal, upload manual</label>
-        <textarea id="f_photos"></textarea>
+        <label>Kategori</label>
+        <select id="f_category">
+          <option value="">-- Pilih Kategori --</option>
+          <optgroup label="Alat &amp; Industri">
+            <option value="Alat">Alat (Tools)</option>
+            <option value="Industri &amp; Bisnis">Industri &amp; Bisnis</option>
+            <option value="Bahan Bangunan">Bahan Bangunan</option>
+          </optgroup>
+          <optgroup label="Elektronik">
+            <option value="Elektronik">Elektronik &amp; Komputer</option>
+            <option value="Ponsel">Ponsel &amp; Handphone</option>
+            <option value="Peralatan Rumah Tangga">Peralatan Rumah Tangga</option>
+          </optgroup>
+          <optgroup label="Kendaraan &amp; Otomotif">
+            <option value="Otomotif">Suku Cadang &amp; Aksesori Mobil/Motor</option>
+            <option value="Mobil">Mobil</option>
+            <option value="Motor">Sepeda Motor</option>
+            <option value="Sepeda">Sepeda</option>
+          </optgroup>
+          <optgroup label="Rumah &amp; Taman">
+            <option value="Furnitur">Furnitur</option>
+            <option value="Dekorasi Rumah">Dekorasi Rumah</option>
+            <option value="Taman">Taman &amp; Luar Ruangan</option>
+          </optgroup>
+          <optgroup label="Pakaian &amp; Aksesori">
+            <option value="Pakaian Pria">Pakaian &amp; Sepatu Pria</option>
+            <option value="Pakaian Wanita">Pakaian &amp; Sepatu Wanita</option>
+            <option value="Perhiasan &amp; Jam Tangan">Perhiasan &amp; Jam Tangan</option>
+            <option value="Kesehatan &amp; Kecantikan">Kesehatan &amp; Kecantikan</option>
+          </optgroup>
+          <optgroup label="Hobi &amp; Lainnya">
+            <option value="Olahraga">Olahraga &amp; Luar Ruangan</option>
+            <option value="Mainan &amp; Game">Mainan &amp; Game</option>
+            <option value="Buku, Film &amp; Musik">Buku, Film &amp; Musik</option>
+            <option value="Persediaan Hewan Peliharaan">Persediaan Hewan Peliharaan</option>
+            <option value="Lainnya">Lainnya / Umum</option>
+          </optgroup>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Kondisi</label>
+        <select id="f_condition">
+          <option value="">-- Pilih Kondisi --</option>
+          <option value="Baru">Baru</option>
+          <option value="Bekas - Seperti Baru">Bekas - Seperti Baru</option>
+          <option value="Bekas - Baik">Bekas - Baik</option>
+          <option value="Bekas - Cukup Baik">Bekas - Cukup Baik</option>
+        </select>
+      </div>
+
+      <div class="field"><label>Lokasi (Kota / Kecamatan)</label><input id="f_location" placeholder="mis. Surakarta / Solo" /></div>
+      <div class="field"><label>Keterangan / Deskripsi</label><textarea id="f_desc" placeholder="Tuliskan spesifikasi produk..."></textarea></div>
+      <div class="field">
+        <label>URL Foto (satu per baris / koma)</label>
+        <textarea id="f_photos" placeholder="https://...jpg"></textarea>
       </div>
       <button class="secondary" id="tplSave">Simpan Template</button>
     </div>
