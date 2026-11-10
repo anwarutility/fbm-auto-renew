@@ -3,13 +3,20 @@
 //  2. POST   : halaman /marketplace/create/... -> isi form dari template (semi-otomatis)
 //
 // Keduanya dipicu lewat flag `pending` di storage yang ditulis background.js
-// (alarm harian untuk renew, tombol "Post Sekarang" untuk posting).
+// atau via pesan langsung 'run-post-fill'.
 
 const RENEW_WORDS = ['renew', 'perbarui', 'perpanjang'];
 const DEFAULTS = { maxPerRun: 10, minDelayMs: 4000, maxDelayMs: 15000 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rand = (a, b) => Math.floor(a + Math.random() * (b - a));
+
+// Listener pesan langsung (jika tab sudah terbuka)
+browser.runtime.onMessage.addListener((msg) => {
+  if (msg.type === 'run-post-fill' && msg.template) {
+    fillListing(msg.template);
+  }
+});
 
 init().catch((e) => console.error('[fbm] init error', e));
 
@@ -206,74 +213,155 @@ async function initPost() {
   await fillListing(postState.template || {});
 }
 
-// set nilai pada input React: native setter + event, bukan sekadar .value =
+// set nilai pada input React: native setter + dispatch events
 function setReactValue(el, value) {
+  if (!el) return;
   const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-  const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
-  setter.call(el, value);
-  el.dispatchEvent(new Event('input', { bubbles: true }));
-  el.dispatchEvent(new Event('change', { bubbles: true }));
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+  if (setter) {
+    setter.call(el, value);
+  } else {
+    el.value = value;
+  }
+  el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+  el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
+  el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+  el.dispatchEvent(new Event('blur', { bubbles: true }));
 }
 
-// cari field berdasarkan aria-label / placeholder (case-insensitive, contains)
-function findField(label, tagName) {
-  const wanted = (label || '').toLowerCase();
-  const els = [...document.querySelectorAll(tagName || 'input, textarea, [role="combobox"]')];
-  return els.find((el) => {
-    const l = (el.getAttribute('aria-label') || '').toLowerCase();
-    const p = (el.getAttribute('placeholder') || '').toLowerCase();
-    return l.includes(wanted) || p.includes(wanted);
-  });
+function matchText(text, aliases) {
+  if (!text) return false;
+  const s = text.toLowerCase().trim();
+  return aliases.some((a) => s.includes(a.toLowerCase()));
+}
+
+// cari field berdasarkan aliases (multi-bahasa ID + EN), memeriksa label/placeholder/name/parent
+function findField(aliases, tagName) {
+  const aliasList = Array.isArray(aliases) ? aliases : [aliases];
+  const candidates = [...document.querySelectorAll(tagName || 'input:not([type="hidden"]), textarea, [role="combobox"], [contenteditable="true"]')];
+
+  // 1. Cek langsung atribut pada input/textarea
+  for (const el of candidates) {
+    if (
+      matchText(el.getAttribute('aria-label'), aliasList) ||
+      matchText(el.getAttribute('placeholder'), aliasList) ||
+      matchText(el.getAttribute('name'), aliasList)
+    ) {
+      return el;
+    }
+  }
+
+  // 2. Cek label pembungkus terdekat (<label aria-label="..."> atau teks label)
+  for (const el of candidates) {
+    const lbl = el.closest('label');
+    if (lbl) {
+      if (
+        matchText(lbl.getAttribute('aria-label'), aliasList) ||
+        matchText(lbl.textContent, aliasList)
+      ) {
+        return el;
+      }
+    }
+  }
+
+  // 3. Cek aria-labelledby
+  for (const el of candidates) {
+    const id = el.getAttribute('aria-labelledby');
+    if (id) {
+      const refEl = document.getElementById(id);
+      if (refEl && matchText(refEl.textContent, aliasList)) {
+        return el;
+      }
+    }
+  }
+
+  // 4. Cek container pembungkus langsung
+  for (const el of candidates) {
+    const parent = el.parentElement;
+    if (parent && parent.children.length <= 4) {
+      if (matchText(parent.textContent, aliasList)) {
+        return el;
+      }
+    }
+  }
+
+  return null;
 }
 
 // isi combobox pencarian (Category / Location / Condition): ketik -> pilih opsi
-async function fillCombobox(label, value) {
+async function fillCombobox(aliases, value) {
   if (!value) return false;
-  const el = findField(label, 'input[role="combobox"], input');
+  const el = await waitFor(() => findField(aliases, 'input[role="combobox"], input, [role="combobox"]'), 6000, 300);
   if (!el) return false;
 
-  el.focus();
-  setReactValue(el, '');
-  await sleep(250);
-  setReactValue(el, value);
-  await sleep(900);
+  const targetInput = el.tagName === 'INPUT' ? el : el.querySelector('input') || el;
 
-  const option = [...document.querySelectorAll('[role="option"]')].find((o) =>
-    norm(o).includes(value.toLowerCase())
-  );
-  if (option) { click(option); await sleep(600); return true; }
+  targetInput.focus();
+  click(targetInput);
+  await sleep(300);
 
-  // opsi tidak cocok -> kosongkan lagi supaya tidak nyangkut
-  setReactValue(el, '');
+  if (targetInput.tagName === 'INPUT') {
+    setReactValue(targetInput, '');
+    await sleep(200);
+    setReactValue(targetInput, value);
+    await sleep(900);
+  }
+
+  const option = await waitFor(() => {
+    return [...document.querySelectorAll('[role="option"], [role="listbox"] span, [role="menuitem"]')].find((o) =>
+      norm(o).includes(value.toLowerCase())
+    );
+  }, 4000, 300);
+
+  if (option) {
+    click(option);
+    await sleep(600);
+    return true;
+  }
+
   return false;
 }
 
 // isi field teks biasa (Title / Price / Description)
-function fillText(label, value) {
+async function fillText(aliases, value) {
   if (!value) return false;
-  const el = findField(label);
+  const el = await waitFor(() => findField(aliases, 'input:not([type="hidden"]), textarea, [contenteditable="true"]'), 6000, 300);
   if (!el) return false;
+
   el.focus();
-  setReactValue(el, String(value));
+  if (el.isContentEditable) {
+    document.execCommand('selectAll', false, null);
+    document.execCommand('insertText', false, String(value));
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  } else {
+    setReactValue(el, String(value));
+  }
+  await sleep(250);
   return true;
 }
 
 // Condition: kalau bukan combobox, cari tombol/radio dengan teks yang cocok
 async function fillCondition(value) {
   if (!value) return false;
-  if (await fillCombobox('condition', value)) return true;
+  const aliases = ['kondisi', 'condition'];
+  if (await fillCombobox(aliases, value)) return true;
 
   const wanted = value.toLowerCase();
-  const btn = [...document.querySelectorAll('[role="button"], [role="radio"]')].find(
+  const btn = [...document.querySelectorAll('[role="button"], [role="radio"], [role="option"]')].find(
     (el) => norm(el).includes(wanted) && el.offsetParent
   );
-  if (btn) { click(btn); await sleep(500); return true; }
+  if (btn) {
+    click(btn);
+    await sleep(500);
+    return true;
+  }
   return false;
 }
 
 // foto: unduh dari URL (via background) -> File -> inject ke input[type=file]
 async function addPhotos(urls) {
-  const input = document.querySelector('input[type="file"][accept*="image"]');
+  const input = await waitFor(() => document.querySelector('input[type="file"][accept*="image"]'), 8000, 400);
   const manualNeeded = [];
   const files = [];
 
@@ -293,9 +381,9 @@ async function addPhotos(urls) {
     const dt = new DataTransfer();
     files.forEach((f) => dt.items.add(f));
     input.files = dt.files;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-    await sleep(800);
+    input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+    await sleep(1000);
     return { ok: true, count: files.length, manualNeeded };
   }
   return { ok: false, count: 0, manualNeeded };
@@ -310,11 +398,11 @@ function splitPhotoUrls(raw) {
 
 function highlightPublish() {
   const btn = [...document.querySelectorAll('[role="button"], button')].find(
-    (b) => /publish|terbitkan|post|biting/i.test(norm(b)) && b.offsetParent
+    (b) => /publish|terbitkan|selanjutnya|next|post|biting/i.test(norm(b)) && b.offsetParent
   );
   if (btn) {
     btn.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    btn.style.outline = '3px solid #1877f2';
+    btn.style.outline = '4px solid #1877f2';
     btn.style.outlineOffset = '3px';
     return true;
   }
@@ -324,19 +412,49 @@ function highlightPublish() {
 async function fillListing(t) {
   const report = (status) => send({ type: 'post-progress', status });
 
-  await waitFor(() => document.readyState === 'complete', 20000, 300);
-  await report('Mengisi form...');
+  await report('Menunggu form Marketplace siap...');
+  // Tunggu sampai form marketplace benar-benar dirender oleh React
+  await waitFor(() => {
+    const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea, [contenteditable="true"]');
+    return inputs.length >= 2;
+  }, 25000, 500);
+
+  await sleep(1500);
+  await report('Mengisi data iklan...');
 
   const results = [];
 
-  results.push(['title', fillText('title', t.title)]);
-  results.push(['price', fillText('price', t.price)]);
-  results.push(['description', fillText('description', t.description)]);
+  // 1. Judul (ID + EN)
+  results.push(['title', await fillText(['judul', 'title', 'apa yang anda jual', 'what are you selling'], t.title)]);
+  await sleep(400);
 
-  if (t.category) results.push(['category', await fillCombobox('category', t.category)]);
-  if (t.condition) results.push(['condition', await fillCondition(t.condition)]);
-  if (t.location) results.push(['location', await fillCombobox('location', t.location)]);
+  // 2. Harga (ID + EN)
+  results.push(['price', await fillText(['harga', 'price'], t.price)]);
+  await sleep(400);
 
+  // 3. Kategori (jika diisi)
+  if (t.category) {
+    results.push(['category', await fillCombobox(['kategori', 'category'], t.category)]);
+    await sleep(400);
+  }
+
+  // 4. Kondisi (jika diisi)
+  if (t.condition) {
+    results.push(['condition', await fillCondition(t.condition)]);
+    await sleep(400);
+  }
+
+  // 5. Deskripsi (ID + EN)
+  results.push(['description', await fillText(['keterangan', 'deskripsi', 'description'], t.description)]);
+  await sleep(400);
+
+  // 6. Lokasi (jika diisi)
+  if (t.location) {
+    results.push(['location', await fillCombobox(['lokasi', 'location', 'kota', 'city'], t.location)]);
+    await sleep(400);
+  }
+
+  // 7. Foto (jika ada)
   const photoUrls = splitPhotoUrls(t.photos);
   let photoResult = { ok: false, count: 0, manualNeeded: [] };
   if (photoUrls.length) {

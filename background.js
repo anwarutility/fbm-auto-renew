@@ -45,7 +45,7 @@ async function startRun(source) {
     }
   });
 
-  const tabs = await browser.tabs.query({ url: 'https://www.facebook.com/*' });
+  const tabs = await browser.tabs.query({ url: 'https://*.facebook.com/*' });
   const marketTab = tabs.find(t => (t.url || '').includes('/marketplace/you'));
   if (marketTab) {
     await browser.tabs.reload(marketTab.id);
@@ -61,9 +61,6 @@ browser.alarms.onAlarm.addListener((alarm) => {
 
 // ---------- POST ----------
 async function startPost(template) {
-  const { postState } = await browser.storage.local.get({ postState: null });
-  if (postState && postState.running && Date.now() - postState.startedAt < STALE_MS) return;
-
   await browser.storage.local.set({
     postState: {
       running: true,
@@ -74,11 +71,19 @@ async function startPost(template) {
     }
   });
 
-  const tabs = await browser.tabs.query({ url: 'https://www.facebook.com/*' });
+  const tabs = await browser.tabs.query({ url: 'https://*.facebook.com/*' });
   const createTab = tabs.find(t => (t.url || '').includes('/marketplace/create'));
+  
   if (createTab) {
-    await browser.tabs.update(createTab.id, { url: CREATE_URL, active: true });
-    await browser.tabs.reload(createTab.id);
+    await browser.tabs.update(createTab.id, { active: true });
+    // Coba kirim langsung jika halaman create sudah terbuka
+    try {
+      await browser.tabs.sendMessage(createTab.id, { type: 'run-post-fill', template });
+      return;
+    } catch (e) {
+      // jika content script belum terpasang, muat ulang tab
+      await browser.tabs.reload(createTab.id);
+    }
   } else {
     await browser.tabs.create({ url: CREATE_URL, active: true });
   }

@@ -115,14 +115,27 @@ $('tplDelete').addEventListener('click', async () => {
 
 // ---------- aksi posting ----------
 $('postBtn').addEventListener('click', async () => {
-  const t = templates.find((x) => x.id === selectedId);
-  if (!t || !t.title) {
-    $('postStatus').textContent = 'Judul wajib diisi (buat/simpan template dulu).';
+  const cur = currentForm();
+  let t = templates.find((x) => x.id === selectedId);
+  if (!t) {
+    t = { id: 't' + Date.now(), ...cur, createdAt: Date.now() };
+    templates.push(t);
+    selectedId = t.id;
+  } else {
+    Object.assign(t, cur);
+  }
+
+  if (!t.title) {
+    $('postStatus').textContent = 'Judul wajib diisi.';
     return;
   }
-  $('postBtn').disabled = true;
-  $('postStatus').textContent = 'Membuka halaman create...';
+
+  // Otomatis simpan perubahan form ke storage
   await browser.storage.local.set({ templates });
+  renderTemplateSelect();
+
+  $('postBtn').disabled = true;
+  $('postStatus').textContent = 'Membuka form & mengisi otomatis...';
   await browser.runtime.sendMessage({ type: 'trigger-post', template: t });
   setTimeout(loadStatus, 1000);
 });
