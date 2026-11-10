@@ -241,7 +241,7 @@ function findField(aliases, tagName) {
   const aliasList = Array.isArray(aliases) ? aliases : [aliases];
   const candidates = [...document.querySelectorAll(tagName || 'input:not([type="hidden"]), textarea, [role="combobox"], [contenteditable="true"]')];
 
-  // 1. Cek langsung atribut pada input/textarea
+  // 1. Cek langsung atribut pada elemen
   for (const el of candidates) {
     if (
       matchText(el.getAttribute('aria-label'), aliasList) ||
@@ -279,7 +279,7 @@ function findField(aliases, tagName) {
   // 4. Cek container pembungkus langsung
   for (const el of candidates) {
     const parent = el.parentElement;
-    if (parent && parent.children.length <= 4) {
+    if (parent && parent.children.length <= 5) {
       if (matchText(parent.textContent, aliasList)) {
         return el;
       }
@@ -289,37 +289,152 @@ function findField(aliases, tagName) {
   return null;
 }
 
-// isi combobox pencarian (Category / Location / Condition): ketik -> pilih opsi
-async function fillCombobox(aliases, value) {
-  if (!value) return false;
-  const el = await waitFor(() => findField(aliases, 'input[role="combobox"], input, [role="combobox"]'), 6000, 300);
-  if (!el) return false;
+// Temukan tombol/combobox pemicu popover/dialog/menu (Kategori & Kondisi)
+function findTriggerButton(aliases) {
+  const aliasList = Array.isArray(aliases) ? aliases : [aliases];
+  // Cari di elemen interaktif yang memiliki peran button/combobox atau label
+  const candidates = [
+    ...document.querySelectorAll('label, [role="button"], [role="combobox"], div[tabindex="0"]')
+  ];
 
-  const targetInput = el.tagName === 'INPUT' ? el : el.querySelector('input') || el;
+  for (const el of candidates) {
+    // Hindari elemen input teks
+    if (el.tagName === 'INPUT' && el.type === 'text') continue;
+    if (el.tagName === 'TEXTAREA') continue;
 
-  targetInput.focus();
-  click(targetInput);
-  await sleep(300);
+    const labelText = el.getAttribute('aria-label') || el.innerText || el.textContent || '';
+    if (matchText(labelText, aliasList) && el.offsetParent) {
+      // Jika itu label, prioritaskan anak yang bisa diklik atau label itu sendiri
+      const inner = el.querySelector('[role="combobox"], [role="button"]') || el;
+      return inner;
+    }
+  }
+  return null;
+}
 
-  if (targetInput.tagName === 'INPUT') {
-    setReactValue(targetInput, '');
-    await sleep(200);
-    setReactValue(targetInput, value);
-    await sleep(900);
+// Buka dan pilih opsi dari popover/listbox/dialog FB
+async function selectFromPopup(triggerEl, targetValue) {
+  if (!triggerEl || !targetValue) return false;
+  
+  triggerEl.focus();
+  click(triggerEl);
+  await sleep(600);
+
+  const keywords = targetValue.toLowerCase().split(/[\s,&/-]+/).filter(w => w.length > 2);
+
+  // Cari elemen opsi di dalam DOM (bisa berupa role=option, role=menuitem, role=button, atau teks dalam popover)
+  const option = await waitFor(() => {
+    const all = [
+      ...document.querySelectorAll('[role="option"], [role="menuitem"], [role="listbox"] [role="button"], [role="dialog"] [role="button"], [role="listbox"] span, [role="dialog"] span')
+    ];
+    // 1. Prioritas kecocokan persis atau include penuh
+    const exact = all.find(el => norm(el).includes(targetValue.toLowerCase()) && el.offsetParent);
+    if (exact) return exact;
+
+    // 2. Kecocokan kata kunci utama
+    if (keywords.length) {
+      const partial = all.find(el => {
+        const t = norm(el);
+        return keywords.some(k => t.includes(k)) && el.offsetParent;
+      });
+      if (partial) return partial;
+    }
+    return null;
+  }, 4000, 300);
+
+  if (option) {
+    option.scrollIntoView({ block: 'nearest' });
+    click(option);
+    await sleep(600);
+    return true;
   }
 
+  pressEscape();
+  return false;
+}
+
+// Pilih Kategori di Facebook Marketplace
+async function fillCategory(value) {
+  if (!value) return false;
+  const aliases = ['kategori', 'category'];
+
+  // Coba cari combobox atau tombol dropdown Kategori
+  const trigger = await waitFor(() => findTriggerButton(aliases), 6000, 300);
+  if (trigger) {
+    const ok = await selectFromPopup(trigger, value);
+    if (ok) return true;
+  }
+
+  // Fallback: jika berupa combobox bertipe input ketik
+  const inputEl = findField(aliases, 'input');
+  if (inputEl) {
+    inputEl.focus();
+    click(inputEl);
+    setReactValue(inputEl, value);
+    await sleep(800);
+    const opt = await waitFor(() => {
+      return [...document.querySelectorAll('[role="option"], [role="menuitem"]')].find(o => norm(o).includes(value.toLowerCase()));
+    }, 3000, 300);
+    if (opt) {
+      click(opt);
+      await sleep(500);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Pilih Kondisi di Facebook Marketplace
+async function fillCondition(value) {
+  if (!value) return false;
+  const aliases = ['kondisi', 'condition'];
+
+  const trigger = await waitFor(() => findTriggerButton(aliases), 6000, 300);
+  if (trigger) {
+    const ok = await selectFromPopup(trigger, value);
+    if (ok) return true;
+  }
+
+  // Fallback: tombol langsung dengan teks kondisi
+  const wanted = value.toLowerCase();
+  const btn = [...document.querySelectorAll('[role="button"], [role="radio"], [role="option"]')].find(
+    (el) => norm(el).includes(wanted) && el.offsetParent
+  );
+  if (btn) {
+    click(btn);
+    await sleep(500);
+    return true;
+  }
+  return false;
+}
+
+// Pilih Lokasi di Facebook Marketplace
+async function fillLocation(value) {
+  if (!value) return false;
+  const aliases = ['lokasi', 'location', 'kota', 'city'];
+  const el = await waitFor(() => findField(aliases, 'input'), 6000, 300);
+  if (!el) return false;
+
+  el.focus();
+  click(el);
+  await sleep(200);
+  setReactValue(el, '');
+  await sleep(200);
+  setReactValue(el, value);
+  await sleep(1000);
+
   const option = await waitFor(() => {
-    return [...document.querySelectorAll('[role="option"], [role="listbox"] span, [role="menuitem"]')].find((o) =>
+    return [...document.querySelectorAll('[role="option"], [role="listbox"] span')].find((o) =>
       norm(o).includes(value.toLowerCase())
     );
   }, 4000, 300);
 
   if (option) {
     click(option);
-    await sleep(600);
+    await sleep(500);
     return true;
   }
-
   return false;
 }
 
@@ -339,24 +454,6 @@ async function fillText(aliases, value) {
   }
   await sleep(250);
   return true;
-}
-
-// Condition: kalau bukan combobox, cari tombol/radio dengan teks yang cocok
-async function fillCondition(value) {
-  if (!value) return false;
-  const aliases = ['kondisi', 'condition'];
-  if (await fillCombobox(aliases, value)) return true;
-
-  const wanted = value.toLowerCase();
-  const btn = [...document.querySelectorAll('[role="button"], [role="radio"], [role="option"]')].find(
-    (el) => norm(el).includes(wanted) && el.offsetParent
-  );
-  if (btn) {
-    click(btn);
-    await sleep(500);
-    return true;
-  }
-  return false;
 }
 
 // foto: unduh dari URL (via background) -> File -> inject ke input[type=file]
@@ -417,7 +514,6 @@ async function fillListing(t) {
 
   try {
     await report('Menunggu form Marketplace siap...');
-    // Tunggu sampai form marketplace benar-benar dirender oleh React
     await waitFor(() => {
       const inputs = document.querySelectorAll('input:not([type="hidden"]), textarea, [contenteditable="true"]');
       return inputs.length >= 2;
@@ -430,32 +526,38 @@ async function fillListing(t) {
 
     // 1. Judul (ID + EN)
     results.push(['title', await fillText(['judul', 'title', 'apa yang anda jual', 'what are you selling'], t.title)]);
-    await sleep(350);
+    await sleep(400);
 
     // 2. Harga (ID + EN)
     results.push(['price', await fillText(['harga', 'price'], t.price)]);
-    await sleep(350);
+    await sleep(400);
 
-    // 3. Kategori (jika diisi)
+    // 3. Kategori (jika dipilih)
     if (t.category) {
-      results.push(['category', await fillCombobox(['kategori', 'category'], t.category)]);
-      await sleep(350);
+      await report(`Memilih kategori: ${t.category}...`);
+      const catOk = await fillCategory(t.category);
+      results.push(['category', catOk]);
+      await sleep(500);
     }
 
-    // 4. Kondisi (jika diisi)
+    // 4. Kondisi (jika dipilih)
     if (t.condition) {
-      results.push(['condition', await fillCondition(t.condition)]);
-      await sleep(350);
+      await report(`Memilih kondisi: ${t.condition}...`);
+      const condOk = await fillCondition(t.condition);
+      results.push(['condition', condOk]);
+      await sleep(500);
     }
 
     // 5. Deskripsi (ID + EN)
     results.push(['description', await fillText(['keterangan', 'deskripsi', 'description'], t.description)]);
-    await sleep(350);
+    await sleep(400);
 
     // 6. Lokasi (jika diisi)
     if (t.location) {
-      results.push(['location', await fillCombobox(['lokasi', 'location', 'kota', 'city'], t.location)]);
-      await sleep(350);
+      await report(`Mengisi lokasi: ${t.location}...`);
+      const locOk = await fillLocation(t.location);
+      results.push(['location', locOk]);
+      await sleep(400);
     }
 
     // 7. Foto (jika ada)
@@ -472,7 +574,7 @@ async function fillListing(t) {
     photoCount = photoResult.count;
 
     let status = `Terisi ${filled}/${totalCount} field`;
-    if (photoResult.ok) status += `, ${photoCount} foto terpasang`;
+    if (photoResult.ok) status += `, ${photoResult.count} foto terpasang`;
     if (photoResult.manualNeeded && photoResult.manualNeeded.length) {
       status += ` · ${photoResult.manualNeeded.length} foto gagal (upload manual)`;
     }
